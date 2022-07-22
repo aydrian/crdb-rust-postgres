@@ -3,11 +3,11 @@ use aws_lambda_events::event::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyRes
 use http::header::HeaderMap;
 use lambda_runtime::{handler_fn, Context, Error};
 use log::LevelFilter;
-use openssl::ssl::{SslConnector, SslMethod};
-// use native_tls::{Certificate, TlsConnector};
+// use openssl::ssl::{SslConnector, SslMethod};
+use native_tls::{Certificate, TlsConnector};
 // use postgres::Client;
-use postgres_openssl::MakeTlsConnector;
-// use postgres_native_tls::MakeTlsConnector;
+// use postgres_openssl::MakeTlsConnector;
+use postgres_native_tls::MakeTlsConnector;
 use serde::Serialize;
 use simple_logger::SimpleLogger;
 
@@ -39,14 +39,14 @@ async fn my_handler(
     // let path = event.path.unwrap();
 
     let cert = std::fs::read("../cc-ca.crt")?;
-    let cert = openssl::x509::X509::from_pem(&cert).unwrap();
-    let mut ctx = SslConnector::builder(SslMethod::tls())?;
-    ctx.set_certificate(&cert)?;
+    // let cert = openssl::x509::X509::from_pem(&cert).unwrap();
+    // let mut ctx = SslConnector::builder(SslMethod::tls())?;
+    // ctx.set_certificate(&cert)?;
+    //let connector = MakeTlsConnector::new(ctx.build());
 
-    let connector = MakeTlsConnector::new(ctx.build());
-    //let cert = Certificate::from_pem(&cert)?;
-    //let connector = TlsConnector::builder().add_root_certificate(cert).build()?;
-    //let connector = MakeTlsConnector::new(connector);
+    let cert = Certificate::from_pem(&cert)?;
+    let connector = TlsConnector::builder().add_root_certificate(cert).build()?;
+    let connector = MakeTlsConnector::new(connector);
 
     // let mut client = Client::connect(
     //     &database_url,
