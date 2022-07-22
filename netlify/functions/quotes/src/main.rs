@@ -1,7 +1,9 @@
-use aws_lambda_events::encodings::Body;
-use aws_lambda_events::event::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyResponse};
+use aws_lambda_events::{
+    encodings::Body,
+    event::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyResponse},
+};
 use http::header::HeaderMap;
-use lambda_runtime::{handler_fn, Context, Error};
+use lambda_runtime::{service_fn, Error, LambdaEvent};
 use log::LevelFilter;
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
@@ -24,15 +26,15 @@ async fn main() -> Result<(), Error> {
         .init()
         .unwrap();
 
-    let func = handler_fn(my_handler);
-    lambda_runtime::run(func).await?;
+    let processor = service_fn(handler);
+    lambda_runtime::run(processor).await?;
     Ok(())
 }
 
-async fn my_handler(
-    event: ApiGatewayProxyRequest,
-    _ctx: Context,
+async fn handler(
+    event: LambdaEvent<ApiGatewayProxyRequest>,
 ) -> Result<ApiGatewayProxyResponse, Error> {
+    let (event, _context) = event.into_parts();
     let method = event.http_method;
 
     let client = get_db_client().await?;
