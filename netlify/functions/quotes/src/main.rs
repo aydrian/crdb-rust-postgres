@@ -7,15 +7,19 @@ use lambda_runtime::{service_fn, Error, LambdaEvent};
 use log::LevelFilter;
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
+// use postgres_querybuilder::prelude::{QueryBuilder, QueryBuilderWithSet, QueryBuilderWithWhere};
 use rust_decimal::Decimal;
 use scooby::postgres::update;
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 use simple_logger::SimpleLogger;
 use tokio_postgres::types::Type;
 use tokio_postgres::Client;
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 struct Quote {
+    #[serde_as(as = "Option<DisplayFromStr>")]
     rowid: Option<i64>,
     quote: Option<String>,
     characters: Option<String>,
@@ -65,12 +69,13 @@ async fn handler(
         http::Method::POST => {
             // TODO: Return 400 if deserialize fails
             let new_quote: Quote = serde_json::from_str(&event.body.unwrap())?;
-            let res = insert_quote(client, new_quote).await?;
+            let new_quote = insert_quote(client, new_quote).await?;
+            let quote_json = serde_json::to_string(&new_quote)?;
             ApiGatewayProxyResponse {
                 status_code: 201,
                 headers: HeaderMap::new(),
                 multi_value_headers: HeaderMap::new(),
-                body: Some(Body::Text(res.to_string())),
+                body: Some(Body::Text(quote_json)),
                 is_base64_encoded: Some(false),
             }
         }
@@ -168,7 +173,6 @@ async fn get_quotes(client: Client) -> Result<Vec<Quote>, Error> {
 }
 
 async fn get_quote(client: Client, rowid: i64) -> Result<Quote, Error> {
-    dbg!("rowid = {}", &rowid);
     let row = client
         .query_one(
             "SELECT rowid, quote, characters, stardate, episode FROM quotes WHERE rowid=$1;",
@@ -187,16 +191,16 @@ async fn get_quote(client: Client, rowid: i64) -> Result<Quote, Error> {
     Ok(quote)
 }
 
-async fn insert_quote(client: Client, new_quote: Quote) -> Result<u64, Error> {
+async fn insert_quote(client: Client, new_quote: Quote) -> Result<Quote, Error> {
     let statement = client
         .prepare_typed(
-            "INSERT INTO quotes (quote, characters, stardate, episode) VALUES ($1, $2, $3, $4);",
+            "INSERT INTO quotes (quote, characters, stardate, episode) VALUES ($1, $2, $3, $4) RETURNING rowid, quote, characters, stardate, episode;",
             &[Type::VARCHAR, Type::VARCHAR, Type::NUMERIC, Type::INT8],
         )
         .await?;
 
-    let res = client
-        .execute(
+    let row = client
+        .query_opt(
             &statement,
             &[
                 &new_quote.quote,
@@ -205,9 +209,18 @@ async fn insert_quote(client: Client, new_quote: Quote) -> Result<u64, Error> {
                 &new_quote.episode,
             ],
         )
-        .await?;
+        .await?
+        .unwrap();
 
-    Ok(res)
+    let quote = Quote {
+        rowid: row.get(0),
+        quote: row.get(1),
+        characters: row.get(2),
+        stardate: row.get(3),
+        episode: row.get(4),
+    };
+
+    Ok(quote)
 }
 
 async fn update_quote(client: Client, rowid: i64, quote: Quote) -> Result<u64, Error> {
@@ -216,6 +229,25 @@ async fn update_quote(client: Client, rowid: i64, quote: Quote) -> Result<u64, E
     let query = query.where_(format!("rowid={}", rowid));
 
     let statement = client.prepare(&query.to_string()).await?;
+
+    // let mut builder = postgres_querybuilder::UpdateBuilder::new("quotes");
+    // if let Some(q) = quote.quote {
+    //     builder.set("quote", q);
+    // };
+    // if let Some(q) = quote.episode {
+    //     builder.set("episode", q);
+    // };
+    // if let Some(q) = quote.characters {
+    //     builder.set("characters", q);
+    // };
+    // if let Some(q) = quote.stardate {
+    //     builder.set("stardate", q.to_string());
+    // };
+    // builder.where_eq("rowid", rowid);
+    // dbg!(&builder.get_query());
+    // dbg!(&builder.get_ref_params());
+
+    // let statement = client.prepare(&builder.get_query()).await?;
 
     let res = client.execute(&statement, &[]).await?;
 
