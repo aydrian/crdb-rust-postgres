@@ -172,23 +172,27 @@ async fn get_quotes(client: Client) -> Result<Vec<Quote>, Error> {
     Ok(quotes)
 }
 
-async fn get_quote(client: Client, rowid: i64) -> Result<Quote, Error> {
+async fn get_quote(client: Client, rowid: i64) -> Result<Option<Quote>, tokio_postgres::Error> {
     let row = client
-        .query_one(
+        .query_opt(
             "SELECT rowid, quote, characters, stardate, episode FROM quotes WHERE rowid=$1;",
             &[&rowid],
         )
         .await?;
 
-    let quote = Quote {
-        rowid: row.get(0),
-        quote: row.get(1),
-        characters: row.get(2),
-        stardate: row.get(3),
-        episode: row.get(4),
-    };
-
-    Ok(quote)
+    match row {
+        Some(row) => {
+            let quote = Quote {
+                rowid: row.get(0),
+                quote: row.get(1),
+                characters: row.get(2),
+                stardate: row.get(3),
+                episode: row.get(4),
+            };
+            Ok(Some(quote))
+        }
+        None => Ok(None),
+    }
 }
 
 async fn insert_quote(client: Client, new_quote: Quote) -> Result<Quote, Error> {
