@@ -15,6 +15,7 @@ tokio = "1.6.1"
 openssl = "0.10.40"
 postgres-openssl = "0.5.0"
 rust_decimal = { version = "1.25.0", features = ["db-tokio-postgres"] }
+scooby = "0.4.0"
 serde = "1.0.140"
 serde_json = "1.0.82"
 tokio-postgres = "0.7.6"

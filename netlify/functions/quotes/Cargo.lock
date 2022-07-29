@@ -764,6 +764,7 @@ dependencies = [
  "openssl",
  "postgres-openssl",
  "rust_decimal",
+ "scooby",
  "serde",
  "serde_json",
  "simple_logger",
@@ -830,6 +831,12 @@ name = "ryu"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3f6f92acf49d1b98f7a81226834412ada05458b7364277387724a237f062695"
+
+[[package]]
+name = "scooby"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "868e01623658f0c794bfe97af6929632018d7fdf0d2418a404cb8e857c949ec5"
 
 [[package]]
 name = "scopeguard"

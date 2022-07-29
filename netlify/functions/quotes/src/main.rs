@@ -8,6 +8,7 @@ use log::LevelFilter;
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
 use rust_decimal::Decimal;
+use scooby::postgres::update;
 use serde::{Deserialize, Serialize};
 use simple_logger::SimpleLogger;
 use tokio_postgres::types::Type;
@@ -15,7 +16,7 @@ use tokio_postgres::Client;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Quote {
-    id: Option<i64>,
+    rowid: Option<i64>,
     quote: Option<String>,
     characters: Option<String>,
     stardate: Option<Decimal>,
@@ -44,18 +45,25 @@ async fn handler(
 
     let resp = match method {
         http::Method::GET => {
-            let quotes = get_quotes(client).await?;
-            let json_quotes = serde_json::to_string(&quotes)?;
+            let json_resp = if let Some(rowid) = event.query_string_parameters.first("rowid") {
+                // Handle not found error
+                let quote = get_quote(client, rowid.parse::<i64>()?).await?;
+                serde_json::to_string(&quote)?
+            } else {
+                let quotes = get_quotes(client).await?;
+                serde_json::to_string(&quotes)?
+            };
 
             ApiGatewayProxyResponse {
                 status_code: 200,
                 headers: HeaderMap::new(),
                 multi_value_headers: HeaderMap::new(),
-                body: Some(Body::Text(json_quotes)),
+                body: Some(Body::Text(json_resp)),
                 is_base64_encoded: Some(false),
             }
         }
         http::Method::POST => {
+            // TODO: Return 400 if deserialize fails
             let new_quote: Quote = serde_json::from_str(&event.body.unwrap())?;
             let res = insert_quote(client, new_quote).await?;
             ApiGatewayProxyResponse {
@@ -66,7 +74,28 @@ async fn handler(
                 is_base64_encoded: Some(false),
             }
         }
+        http::Method::PUT => {
+            // TODO: Return 400 if no rowid given
+            let rowid: i64 = event
+                .query_string_parameters
+                .first("rowid")
+                .unwrap()
+                .parse()?;
+            // TODO: Return 400 if deserialize fails
+            let quote = serde_json::from_str(&event.body.unwrap())?;
+
+            let res = update_quote(client, rowid, quote).await?;
+
+            ApiGatewayProxyResponse {
+                status_code: 201,
+                headers: HeaderMap::new(),
+                multi_value_headers: HeaderMap::new(),
+                body: Some(Body::Text(res.to_string())),
+                is_base64_encoded: Some(false),
+            }
+        }
         http::Method::DELETE => {
+            // TODO: Return 400 if no rowid given
             let rowid: i64 = event
                 .query_string_parameters
                 .first("rowid")
@@ -126,7 +155,7 @@ async fn get_quotes(client: Client) -> Result<Vec<Quote>, Error> {
         .await?
     {
         let quote = Quote {
-            id: row.get(0),
+            rowid: row.get(0),
             quote: row.get(1),
             characters: row.get(2),
             stardate: row.get(3),
@@ -136,6 +165,26 @@ async fn get_quotes(client: Client) -> Result<Vec<Quote>, Error> {
     }
 
     Ok(quotes)
+}
+
+async fn get_quote(client: Client, rowid: i64) -> Result<Quote, Error> {
+    dbg!("rowid = {}", &rowid);
+    let row = client
+        .query_one(
+            "SELECT rowid, quote, characters, stardate, episode FROM quotes WHERE rowid=$1;",
+            &[&rowid],
+        )
+        .await?;
+
+    let quote = Quote {
+        rowid: row.get(0),
+        quote: row.get(1),
+        characters: row.get(2),
+        stardate: row.get(3),
+        episode: row.get(4),
+    };
+
+    Ok(quote)
 }
 
 async fn insert_quote(client: Client, new_quote: Quote) -> Result<u64, Error> {
@@ -157,6 +206,18 @@ async fn insert_quote(client: Client, new_quote: Quote) -> Result<u64, Error> {
             ],
         )
         .await?;
+
+    Ok(res)
+}
+
+async fn update_quote(client: Client, rowid: i64, quote: Quote) -> Result<u64, Error> {
+    let query = update("quote");
+    let query = query.set("quote", quote.quote.unwrap());
+    let query = query.where_(format!("rowid={}", rowid));
+
+    let statement = client.prepare(&query.to_string()).await?;
+
+    let res = client.execute(&statement, &[]).await?;
 
     Ok(res)
 }
