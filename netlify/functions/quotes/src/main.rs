@@ -7,15 +7,18 @@ use lambda_runtime::{service_fn, Error, LambdaEvent};
 use log::LevelFilter;
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
-use serde::Serialize;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use simple_logger::SimpleLogger;
+use tokio_postgres::types::Type;
 use tokio_postgres::Client;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Quote {
+    id: Option<i64>,
     quote: Option<String>,
     characters: Option<String>,
-    stardate: Option<rust_decimal::Decimal>,
+    stardate: Option<Decimal>,
     episode: Option<i64>,
 }
 
@@ -49,6 +52,34 @@ async fn handler(
                 headers: HeaderMap::new(),
                 multi_value_headers: HeaderMap::new(),
                 body: Some(Body::Text(json_quotes)),
+                is_base64_encoded: Some(false),
+            }
+        }
+        http::Method::POST => {
+            let new_quote: Quote = serde_json::from_str(&event.body.unwrap())?;
+            let res = insert_quote(client, new_quote).await?;
+            ApiGatewayProxyResponse {
+                status_code: 201,
+                headers: HeaderMap::new(),
+                multi_value_headers: HeaderMap::new(),
+                body: Some(Body::Text(res.to_string())),
+                is_base64_encoded: Some(false),
+            }
+        }
+        http::Method::DELETE => {
+            let rowid: i64 = event
+                .query_string_parameters
+                .first("rowid")
+                .unwrap()
+                .parse()?;
+
+            let _res = delete_quote(client, rowid).await?;
+
+            ApiGatewayProxyResponse {
+                status_code: 204,
+                headers: HeaderMap::new(),
+                multi_value_headers: HeaderMap::new(),
+                body: Some(Body::Empty),
                 is_base64_encoded: Some(false),
             }
         }
@@ -89,19 +120,53 @@ async fn get_quotes(client: Client) -> Result<Vec<Quote>, Error> {
 
     for row in client
         .query(
-            "SELECT quote, characters, stardate, episode FROM quotes ORDER BY episode asc LIMIT 20;",
+            "SELECT rowid, quote, characters, stardate, episode FROM quotes ORDER BY episode asc LIMIT 20;",
             &[],
         )
         .await?
     {
         let quote = Quote {
-            quote: row.get(0),
-            characters: row.get(1),
-            stardate: row.get(2),
-            episode: row.get(3),
+            id: row.get(0),
+            quote: row.get(1),
+            characters: row.get(2),
+            stardate: row.get(3),
+            episode: row.get(4),
         };
         quotes.push(quote);
     }
 
     Ok(quotes)
+}
+
+async fn insert_quote(client: Client, new_quote: Quote) -> Result<u64, Error> {
+    let statement = client
+        .prepare_typed(
+            "INSERT INTO quotes (quote, characters, stardate, episode) VALUES ($1, $2, $3, $4);",
+            &[Type::VARCHAR, Type::VARCHAR, Type::NUMERIC, Type::INT8],
+        )
+        .await?;
+
+    let res = client
+        .execute(
+            &statement,
+            &[
+                &new_quote.quote,
+                &new_quote.characters,
+                &new_quote.stardate,
+                &new_quote.episode,
+            ],
+        )
+        .await?;
+
+    Ok(res)
+}
+
+async fn delete_quote(client: Client, rowid: i64) -> Result<u64, Error> {
+    let statement = client
+        .prepare_typed("DELETE FROM quotes WHERE rowid = $1", &[Type::INT8])
+        .await?;
+
+    let res = client.execute(&statement, &[&rowid]).await?;
+
+    Ok(res)
 }
