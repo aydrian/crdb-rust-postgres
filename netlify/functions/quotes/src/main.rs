@@ -149,7 +149,7 @@ async fn get_db_client() -> Result<Client, Error> {
     return Ok(client);
 }
 
-async fn get_quotes(client: Client) -> Result<Vec<Quote>, Error> {
+async fn get_quotes(client: Client) -> Result<Vec<Quote>, tokio_postgres::Error> {
     let mut quotes = Vec::new();
 
     for row in client
@@ -195,7 +195,7 @@ async fn get_quote(client: Client, rowid: i64) -> Result<Option<Quote>, tokio_po
     }
 }
 
-async fn insert_quote(client: Client, new_quote: Quote) -> Result<Quote, Error> {
+async fn insert_quote(client: Client, new_quote: Quote) -> Result<Quote, tokio_postgres::Error> {
     let statement = client
         .prepare_typed(
             "INSERT INTO quotes (quote, characters, stardate, episode) VALUES ($1, $2, $3, $4) RETURNING rowid, quote, characters, stardate, episode;",
@@ -227,7 +227,11 @@ async fn insert_quote(client: Client, new_quote: Quote) -> Result<Quote, Error> 
     Ok(quote)
 }
 
-async fn update_quote(client: Client, rowid: i64, quote: Quote) -> Result<u64, Error> {
+async fn update_quote(
+    client: Client,
+    rowid: i64,
+    quote: Quote,
+) -> Result<u64, tokio_postgres::Error> {
     let query = update("quote");
     let query = query.set("quote", quote.quote.unwrap());
     let query = query.where_(format!("rowid={}", rowid));
@@ -258,7 +262,7 @@ async fn update_quote(client: Client, rowid: i64, quote: Quote) -> Result<u64, E
     Ok(res)
 }
 
-async fn delete_quote(client: Client, rowid: i64) -> Result<u64, Error> {
+async fn delete_quote(client: Client, rowid: i64) -> Result<u64, tokio_postgres::Error> {
     let statement = client
         .prepare_typed("DELETE FROM quotes WHERE rowid = $1", &[Type::INT8])
         .await?;
