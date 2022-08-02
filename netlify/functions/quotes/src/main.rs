@@ -77,45 +77,56 @@ async fn handler(
             }
         }
         http::Method::PUT => {
-            // TODO: Return 400 if no rowid given
-            let rowid: i64 = event
-                .query_string_parameters
-                .first("rowid")
-                .unwrap()
-                .parse()?;
-            // TODO: Return 400 if deserialize fails
-            let updated_quote = serde_json::from_str(&event.body.unwrap())?;
+            match event.query_string_parameters.first("rowid") {
+                Some(rowid) => {
+                    let rowid: i64 = rowid.parse()?;
 
-            let quote = update_quote(client, rowid, updated_quote).await?;
+                    // TODO: Return 400 if deserialize fails
+                    let updated_quote = serde_json::from_str(&event.body.unwrap())?;
 
-            let json_resp = serde_json::to_string(&quote)?;
+                    let quote = update_quote(client, rowid, updated_quote).await?;
 
-            ApiGatewayProxyResponse {
-                status_code: 200,
-                headers: HeaderMap::new(),
-                multi_value_headers: HeaderMap::new(),
-                body: Some(Body::Text(json_resp)),
-                is_base64_encoded: Some(false),
+                    let json_resp = serde_json::to_string(&quote)?;
+
+                    ApiGatewayProxyResponse {
+                        status_code: 200,
+                        headers: HeaderMap::new(),
+                        multi_value_headers: HeaderMap::new(),
+                        body: Some(Body::Text(json_resp)),
+                        is_base64_encoded: Some(false),
+                    }
+                }
+                None => ApiGatewayProxyResponse {
+                    status_code: 400,
+                    headers: HeaderMap::new(),
+                    multi_value_headers: HeaderMap::new(),
+                    body: Some(Body::Text(String::from("rowid is required"))),
+                    is_base64_encoded: Some(false),
+                },
             }
         }
-        http::Method::DELETE => {
-            // TODO: Return 400 if no rowid given
-            let rowid: i64 = event
-                .query_string_parameters
-                .first("rowid")
-                .unwrap()
-                .parse()?;
+        http::Method::DELETE => match event.query_string_parameters.first("rowid") {
+            Some(rowid) => {
+                let rowid: i64 = rowid.parse()?;
 
-            let _res = delete_quote(client, rowid).await?;
+                let _res = delete_quote(client, rowid).await?;
 
-            ApiGatewayProxyResponse {
-                status_code: 204,
+                ApiGatewayProxyResponse {
+                    status_code: 204,
+                    headers: HeaderMap::new(),
+                    multi_value_headers: HeaderMap::new(),
+                    body: Some(Body::Empty),
+                    is_base64_encoded: Some(false),
+                }
+            }
+            None => ApiGatewayProxyResponse {
+                status_code: 400,
                 headers: HeaderMap::new(),
                 multi_value_headers: HeaderMap::new(),
-                body: Some(Body::Empty),
+                body: Some(Body::Text(String::from("rowid is required"))),
                 is_base64_encoded: Some(false),
-            }
-        }
+            },
+        },
         _ => ApiGatewayProxyResponse {
             status_code: 405,
             headers: HeaderMap::new(),
