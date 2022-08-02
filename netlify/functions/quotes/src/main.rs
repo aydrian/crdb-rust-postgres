@@ -7,9 +7,7 @@ use lambda_runtime::{service_fn, Error, LambdaEvent};
 use log::LevelFilter;
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
-// use postgres_querybuilder::prelude::{QueryBuilder, QueryBuilderWithSet, QueryBuilderWithWhere};
 use rust_decimal::Decimal;
-use scooby::postgres::update;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use simple_logger::SimpleLogger;
@@ -50,7 +48,6 @@ async fn handler(
     let resp = match method {
         http::Method::GET => {
             let json_resp = if let Some(rowid) = event.query_string_parameters.first("rowid") {
-                // Handle not found error
                 let quote = get_quote(client, rowid.parse::<i64>()?).await?;
                 serde_json::to_string(&quote)?
             } else {
@@ -87,15 +84,17 @@ async fn handler(
                 .unwrap()
                 .parse()?;
             // TODO: Return 400 if deserialize fails
-            let quote = serde_json::from_str(&event.body.unwrap())?;
+            let updated_quote = serde_json::from_str(&event.body.unwrap())?;
 
-            let res = update_quote(client, rowid, quote).await?;
+            let quote = update_quote(client, rowid, updated_quote).await?;
+
+            let json_resp = serde_json::to_string(&quote)?;
 
             ApiGatewayProxyResponse {
-                status_code: 201,
+                status_code: 200,
                 headers: HeaderMap::new(),
                 multi_value_headers: HeaderMap::new(),
-                body: Some(Body::Text(res.to_string())),
+                body: Some(Body::Text(json_resp)),
                 is_base64_encoded: Some(false),
             }
         }
@@ -231,35 +230,44 @@ async fn update_quote(
     client: Client,
     rowid: i64,
     quote: Quote,
-) -> Result<u64, tokio_postgres::Error> {
-    let query = update("quote");
-    let query = query.set("quote", quote.quote.unwrap());
-    let query = query.where_(format!("rowid={}", rowid));
+) -> Result<Option<Quote>, tokio_postgres::Error> {
+    let mut builder = string_builder::Builder::default();
+    builder.append("UPDATE quotes SET ");
+    let mut cols = Vec::new();
+    if let Some(q) = quote.quote {
+        cols.push(format!("quote='{}'", q));
+    }
+    if let Some(q) = quote.characters {
+        cols.push(format!("characters='{}'", q));
+    }
+    if let Some(q) = quote.episode {
+        cols.push(format!("episode={}", q));
+    }
+    if let Some(q) = quote.stardate {
+        cols.push(format!("stardate={}", q));
+    }
+    builder.append(cols.join(", "));
+    builder.append(format!(" WHERE rowid={}", rowid));
+    builder.append(" RETURNING rowid, quote, characters, stardate, episode;");
 
-    let statement = client.prepare(&query.to_string()).await?;
+    let sql = &builder.string().unwrap();
+    let statement = client.prepare(sql).await?;
 
-    // let mut builder = postgres_querybuilder::UpdateBuilder::new("quotes");
-    // if let Some(q) = quote.quote {
-    //     builder.set("quote", q);
-    // };
-    // if let Some(q) = quote.episode {
-    //     builder.set("episode", q);
-    // };
-    // if let Some(q) = quote.characters {
-    //     builder.set("characters", q);
-    // };
-    // if let Some(q) = quote.stardate {
-    //     builder.set("stardate", q.to_string());
-    // };
-    // builder.where_eq("rowid", rowid);
-    // dbg!(&builder.get_query());
-    // dbg!(&builder.get_ref_params());
+    let row = client.query_opt(&statement, &[]).await?;
 
-    // let statement = client.prepare(&builder.get_query()).await?;
-
-    let res = client.execute(&statement, &[]).await?;
-
-    Ok(res)
+    match row {
+        Some(row) => {
+            let quote = Quote {
+                rowid: row.get(0),
+                quote: row.get(1),
+                characters: row.get(2),
+                stardate: row.get(3),
+                episode: row.get(4),
+            };
+            Ok(Some(quote))
+        }
+        None => Ok(None),
+    }
 }
 
 async fn delete_quote(client: Client, rowid: i64) -> Result<u64, tokio_postgres::Error> {
